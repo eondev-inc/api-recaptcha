@@ -1,0 +1,7 @@
+{
+  "event": {
+    "token": "CLIENT_SIDE_RECAPTCHA_TOKEN",
+    "expectedAction": "USER_ACTION_OPTIONAL",
+    "siteKey": "aSiteKey"
+  }
+}

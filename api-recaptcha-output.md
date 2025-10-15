@@ -1,0 +1,445 @@
+# 📁 PROJECT EXPORT FOR LLMs
+
+## 📊 Project Information
+
+- **Project Name**: `api-recaptcha`
+- **Generated On**: 2025-10-15 01:23:58 (America/Santiago / GMT-03:00)
+- **Total Files Processed**: 7
+- **Export Tool**: Easy Whole Project to Single Text File for LLMs v1.1.0
+- **Tool Author**: Jota / José Guilherme Pandolfi
+
+### ⚙️ Export Configuration
+
+| Setting | Value |
+|---------|-------|
+| Language | `en` |
+| Max File Size | `1 MB` |
+| Include Hidden Files | `false` |
+| Output Format | `both` |
+
+## 🌳 Project Structure
+
+```
+├── 📁 cmd/
+│   └── 📁 server/
+│       └── 📄 main.go (1.18 KB)
+├── 📁 internal/
+│   ├── 📁 handler/
+│   │   └── 📄 verify.go (1.12 KB)
+│   ├── 📁 middleware/
+│   │   └── 📄 apikey.go (610 B)
+│   └── 📁 service/
+│       └── 📄 recaptcha.go (3.79 KB)
+├── 📄 go.mod (1.38 KB)
+├── 📄 go.sum (7.92 KB)
+└── 📄 request.json (169 B)
+```
+
+## 📑 Table of Contents
+
+**Project Files:**
+
+- [📄 cmd/server/main.go](#📄-cmd-server-main-go)
+- [📄 internal/handler/verify.go](#📄-internal-handler-verify-go)
+- [📄 internal/middleware/apikey.go](#📄-internal-middleware-apikey-go)
+- [📄 internal/service/recaptcha.go](#📄-internal-service-recaptcha-go)
+- [📄 request.json](#📄-request-json)
+
+---
+
+## 📈 Project Statistics
+
+| Metric | Count |
+|--------|-------|
+| Total Files | 7 |
+| Total Directories | 6 |
+| Text Files | 5 |
+| Binary Files | 2 |
+| Total Size | 16.17 KB |
+
+### 📄 File Types Distribution
+
+| Extension | Count |
+|-----------|-------|
+| `.go` | 4 |
+| `.mod` | 1 |
+| `.sum` | 1 |
+| `.json` | 1 |
+
+## 💻 File Code Contents
+
+### <a id="📄-cmd-server-main-go"></a>📄 `cmd/server/main.go`
+
+**File Info:**
+- **Size**: 1.18 KB
+- **Extension**: `.go`
+- **Language**: `go`
+- **Location**: `cmd/server/main.go`
+- **Relative Path**: `cmd/server`
+- **Created**: 2025-10-15 01:06:52 (America/Santiago / GMT-03:00)
+- **Modified**: 2025-10-15 01:23:46 (America/Santiago / GMT-03:00)
+- **MD5**: `90dfee170f88be6dc7fa2f1f13189a94`
+- **SHA256**: `43cefba176c241ae13a63308687a675454aa7292d260341a5e55578ebd9f6e20`
+- **Encoding**: ASCII
+
+**File code content:**
+
+```go
+package main
+
+import (
+	"log"
+	"os"
+
+	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
+
+	"api-recaptcha/internal/handler"
+	"api-recaptcha/internal/middleware"
+	"api-recaptcha/internal/service"
+)
+
+func main() {
+	// Load .env file if it exists
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: .env file not found, using system environment variables")
+	}
+
+	appAPIKey := os.Getenv("APP_API_KEY")
+	if appAPIKey == "" {
+		log.Fatal("APP_API_KEY environment variable is required")
+	}
+
+	googleAPIKey := os.Getenv("GOOGLE_RECAPTCHA_API_KEY")
+	if googleAPIKey == "" {
+		log.Fatal("GOOGLE_RECAPTCHA_API_KEY environment variable is required")
+	}
+
+	siteKey := os.Getenv("GOOGLE_RECAPTCHA_SITE_KEY")
+	if siteKey == "" {
+		siteKey = "6LfTUuorAAAAAEYi8wmrchk8zaxcasstljmj-ZZT"
+	}
+
+	recaptchaService := service.NewRecaptchaService(googleAPIKey, siteKey)
+	verifyHandler := handler.NewVerifyHandler(recaptchaService)
+
+	router := gin.Default()
+	router.Use(middleware.APIKeyAuth(appAPIKey))
+	router.POST("/api/v1/recaptcha/verify", verifyHandler.Handle)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	if err := router.Run(":" + port); err != nil {
+		log.Fatalf("server failed: %v", err)
+	}
+}
+
+```
+
+---
+
+### <a id="📄-internal-handler-verify-go"></a>📄 `internal/handler/verify.go`
+
+**File Info:**
+- **Size**: 1.12 KB
+- **Extension**: `.go`
+- **Language**: `go`
+- **Location**: `internal/handler/verify.go`
+- **Relative Path**: `internal/handler`
+- **Created**: 2025-10-15 01:07:17 (America/Santiago / GMT-03:00)
+- **Modified**: 2025-10-15 01:15:14 (America/Santiago / GMT-03:00)
+- **MD5**: `b21a6ea9666aefed470a4bf028d1ebe5`
+- **SHA256**: `dfc5b904cb2ae1f1bac9a6cde0ef1c1427e235852cf9bb545a149a8a7615f9a1`
+- **Encoding**: ASCII
+
+**File code content:**
+
+```go
+package handler
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"api-recaptcha/internal/service"
+)
+
+type verifyRequest struct {
+	Token  string `json:"token" binding:"required"`
+	Action string `json:"action"`
+}
+
+// VerifyHandler processes the verification requests coming from the client.
+type VerifyHandler struct {
+	recaptcha *service.RecaptchaService
+}
+
+// NewVerifyHandler wires the dependencies into a VerifyHandler instance.
+func NewVerifyHandler(recaptcha *service.RecaptchaService) VerifyHandler {
+	return VerifyHandler{recaptcha: recaptcha}
+}
+
+// Handle receives a token and delegates the validation to the reCAPTCHA Enterprise API.
+func (h VerifyHandler) Handle(c *gin.Context) {
+	var payload verifyRequest
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body", "details": err.Error()})
+		return
+	}
+
+	assessment, err := h.recaptcha.Assess(c.Request.Context(), payload.Token, payload.Action)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "recaptcha verification failed", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, assessment)
+}
+
+```
+
+---
+
+### <a id="📄-internal-middleware-apikey-go"></a>📄 `internal/middleware/apikey.go`
+
+**File Info:**
+- **Size**: 610 B
+- **Extension**: `.go`
+- **Language**: `go`
+- **Location**: `internal/middleware/apikey.go`
+- **Relative Path**: `internal/middleware`
+- **Created**: 2025-10-15 01:06:58 (America/Santiago / GMT-03:00)
+- **Modified**: 2025-10-15 01:13:21 (America/Santiago / GMT-03:00)
+- **MD5**: `10d35a7b899feaf959985d167cd07f01`
+- **SHA256**: `7e2882fea0e53e799a6e691bf4913bf48274e18ec69c0bf84aed51385e69d4a6`
+- **Encoding**: ASCII
+
+**File code content:**
+
+```go
+package middleware
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+const apiKeyHeader = "X-API-Key"
+
+// APIKeyAuth ensures that incoming requests present the expected API key before hitting the handlers.
+func APIKeyAuth(expectedKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		providedKey := c.GetHeader(apiKeyHeader)
+		if providedKey == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing API key"})
+			return
+		}
+
+		if providedKey != expectedKey {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "invalid API key"})
+			return
+		}
+
+		c.Next()
+	}
+}
+
+```
+
+---
+
+### <a id="📄-internal-service-recaptcha-go"></a>📄 `internal/service/recaptcha.go`
+
+**File Info:**
+- **Size**: 3.79 KB
+- **Extension**: `.go`
+- **Language**: `go`
+- **Location**: `internal/service/recaptcha.go`
+- **Relative Path**: `internal/service`
+- **Created**: 2025-10-15 01:07:09 (America/Santiago / GMT-03:00)
+- **Modified**: 2025-10-15 01:15:14 (America/Santiago / GMT-03:00)
+- **MD5**: `f528b397b4977ebcfb209b215e3ee4e1`
+- **SHA256**: `18b95fad81d3f49f684a654098e5a2195cf9315b6e2626cdee8fb4abbb36e637`
+- **Encoding**: ASCII
+
+**File code content:**
+
+```go
+package service
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+const (
+	recaptchaEndpoint = "https://recaptchaenterprise.googleapis.com/v1/projects/planning-c5f5a/assessments"
+	maxErrorBodyBytes = 1024
+)
+
+// AssessmentResult exposes the relevant information returned by the reCAPTCHA Enterprise API.
+type AssessmentResult struct {
+	Valid         bool      `json:"valid"`
+	Score         float64   `json:"score,omitempty"`
+	Action        string    `json:"action,omitempty"`
+	InvalidReason string    `json:"invalidReason,omitempty"`
+	Reasons       []string  `json:"reasons,omitempty"`
+	CreateTime    time.Time `json:"createTime,omitempty"`
+}
+
+type assessmentRequest struct {
+	Event assessmentEvent `json:"event"`
+}
+
+type assessmentEvent struct {
+	Token          string `json:"token"`
+	SiteKey        string `json:"siteKey"`
+	ExpectedAction string `json:"expectedAction,omitempty"`
+}
+
+type assessmentResponse struct {
+	TokenProperties struct {
+		Valid         bool      `json:"valid"`
+		Action        string    `json:"action"`
+		InvalidReason string    `json:"invalidReason"`
+		CreateTime    time.Time `json:"createTime"`
+	} `json:"tokenProperties"`
+	RiskAnalysis struct {
+		Score   float64  `json:"score"`
+		Reasons []string `json:"reasons"`
+	} `json:"riskAnalysis"`
+}
+
+// RecaptchaService coordinates the interaction with the reCAPTCHA Enterprise API.
+type RecaptchaService struct {
+	client  *http.Client
+	apiKey  string
+	siteKey string
+}
+
+// NewRecaptchaService builds a RecaptchaService with sane defaults.
+func NewRecaptchaService(apiKey, siteKey string) *RecaptchaService {
+	return &RecaptchaService{
+		client:  &http.Client{Timeout: 10 * time.Second},
+		apiKey:  apiKey,
+		siteKey: siteKey,
+	}
+}
+
+// Assess validates the provided token and returns the assessment outcome.
+func (s *RecaptchaService) Assess(ctx context.Context, token, action string) (AssessmentResult, error) {
+	if strings.TrimSpace(token) == "" {
+		return AssessmentResult{}, errors.New("token is required")
+	}
+
+	payload := assessmentRequest{
+		Event: assessmentEvent{
+			Token:   token,
+			SiteKey: s.siteKey,
+		},
+	}
+
+	if trimmedAction := strings.TrimSpace(action); trimmedAction != "" {
+		payload.Event.ExpectedAction = trimmedAction
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return AssessmentResult{}, fmt.Errorf("failed to marshal assessment request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("%s?key=%s", recaptchaEndpoint, s.apiKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return AssessmentResult{}, fmt.Errorf("failed to create assessment request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return AssessmentResult{}, fmt.Errorf("request to reCAPTCHA Enterprise failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return AssessmentResult{}, fmt.Errorf("failed to read assessment response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		trimmed := string(respBody)
+		if len(trimmed) > maxErrorBodyBytes {
+			trimmed = trimmed[:maxErrorBodyBytes]
+		}
+		return AssessmentResult{}, fmt.Errorf("reCAPTCHA Enterprise returned status %d: %s", resp.StatusCode, trimmed)
+	}
+
+	var assessment assessmentResponse
+	if err := json.Unmarshal(respBody, &assessment); err != nil {
+		return AssessmentResult{}, fmt.Errorf("failed to decode assessment response: %w", err)
+	}
+
+	result := AssessmentResult{
+		Valid:         assessment.TokenProperties.Valid,
+		Action:        assessment.TokenProperties.Action,
+		InvalidReason: assessment.TokenProperties.InvalidReason,
+		Score:         assessment.RiskAnalysis.Score,
+		Reasons:       assessment.RiskAnalysis.Reasons,
+		CreateTime:    assessment.TokenProperties.CreateTime,
+	}
+
+	return result, nil
+}
+
+```
+
+---
+
+### <a id="📄-request-json"></a>📄 `request.json`
+
+**File Info:**
+- **Size**: 169 B
+- **Extension**: `.json`
+- **Language**: `json`
+- **Location**: `request.json`
+- **Relative Path**: `root`
+- **Created**: 2025-10-15 01:07:25 (America/Santiago / GMT-03:00)
+- **Modified**: 2025-10-15 01:13:32 (America/Santiago / GMT-03:00)
+- **MD5**: `9b38003b8280dc404934a2dd8ccf3422`
+- **SHA256**: `83a3e0b285bbfd34ad00bb3c0e9ad2e5b3416cb32f95125dbefd634902ae4ea8`
+- **Encoding**: ASCII
+
+**File code content:**
+
+```json
+{
+  "event": {
+    "token": "CLIENT_SIDE_RECAPTCHA_TOKEN",
+    "expectedAction": "USER_ACTION_OPTIONAL",
+    "siteKey": "6LfTUuorAAAAAEYi8wmrchk8zaxcasstljmj-ZZT"
+  }
+}
+
+```
+
+---
+
+## 🚫 Binary/Excluded Files
+
+The following files were not included in the text content:
+
+- `go.mod`
+- `go.sum`
+
