@@ -208,7 +208,6 @@ api-recaptcha/
 │   └── service/
 │       └── recaptcha.go         # Lógica de negocio reCAPTCHA
 ├── docs/architecture/           # Diagrama del sistema (JSON IR + HTML)
-├── odd/tasks/                   # Planes de trabajo y su evidencia
 ├── .env.example                 # Plantilla de variables de entorno
 ├── docker-compose.yml           # Despliegue local
 ├── go.mod                       # Dependencias del proyecto
