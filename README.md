@@ -56,6 +56,21 @@ GOOGLE_RECAPTCHA_PROJECT_ID=tu_project_id
 
 # Server Port (optional, defaults to 8080)
 PORT=8080
+
+# Trusted proxies (optional). Comma-separated list of IPs or CIDR blocks allowed to set
+# X-Forwarded-For. Empty means no peer is trusted and ClientIP() is the real RemoteAddr.
+# List only your own ingress: with Gin's default (trust everyone) a caller picks its own
+# rate-limit bucket by forging the header.
+TRUSTED_PROXIES=
+
+# CORS (optional). Comma-separated allowlist of EXACT origins. Empty means no cross-origin
+# request is allowed. A "*" entry is ignored with a warning: this API is called by servers
+# holding a shared key, so every browser origin is an explicit decision.
+CORS_ALLOWED_ORIGINS=
+
+# Rate limiting (optional)
+RATE_LIMIT_REQUESTS=100
+RATE_LIMIT_WINDOW_SECONDS=60
 ```
 
 ## 🚀 Uso
@@ -108,9 +123,22 @@ X-API-Key: tu_app_api_key
 ```json
 {
   "error": "recaptcha verification failed",
-  "details": "mensaje de error detallado"
+  "code": "RECAPTCHA_FAILED"
 }
 ```
+
+El contrato nunca expone detalle interno: `error` es un mensaje seguro para el cliente y `code` un identificador estable. Códigos posibles: `INVALID_REQUEST`, `VALIDATION_FAILED`, `PAYLOAD_TOO_LARGE`, `RECAPTCHA_FAILED`, `INTERNAL_ERROR`.
+
+**Cuerpo demasiado grande (413):** el body se acota a 8 KiB antes de parsearlo.
+
+```json
+{
+  "error": "request body too large",
+  "code": "PAYLOAD_TOO_LARGE"
+}
+```
+
+**Rate limit (429):** incluye `Retry-After` con los segundos que quedan de ventana.
 
 ### Ejemplo con cURL
 
@@ -166,32 +194,43 @@ api-recaptcha/
 │       └── main.go              # Punto de entrada de la aplicación
 ├── internal/
 │   ├── handler/
-│   │   └── verify.go            # Handler HTTP para verificación
+│   │   ├── verify.go            # Handler HTTP para verificación
+│   │   └── health.go            # /health y /ready
 │   ├── middleware/
-│   │   └── apikey.go            # Middleware de autenticación
+│   │   ├── apikey.go            # Autenticación por X-API-Key
+│   │   ├── cors.go              # CORS con allowlist
+│   │   ├── proxies.go           # Confianza en X-Forwarded-For
+│   │   └── ratelimit.go         # Ventana fija por cliente
+│   ├── errors/
+│   │   └── errors.go            # AppError + códigos del contrato
+│   ├── logger/
+│   │   └── logger.go            # log/slog JSON
 │   └── service/
 │       └── recaptcha.go         # Lógica de negocio reCAPTCHA
-├── .env                         # Variables de entorno (no versionado)
+├── docs/architecture/           # Diagrama del sistema (JSON IR + HTML)
+├── odd/tasks/                   # Planes de trabajo y su evidencia
 ├── .env.example                 # Plantilla de variables de entorno
-├── .gitignore                   # Archivos ignorados por Git
+├── docker-compose.yml           # Despliegue local
 ├── go.mod                       # Dependencias del proyecto
-├── go.sum                       # Checksums de dependencias
-├── request.json                 # Ejemplo de request para pruebas
 └── README.md                    # Este archivo
 ```
 
 ## 🔒 Seguridad
 
-- **API Key**: La aplicación requiere una API Key válida en el header `X-API-Key` para todas las peticiones
-- **Variables de entorno**: Las credenciales sensibles se manejan mediante variables de entorno
-- **`.env` en .gitignore**: El archivo `.env` está excluido del control de versiones para proteger las credenciales
+- **API Key**: La aplicación requiere una API Key válida en el header `X-API-Key`, comparada en tiempo constante (`crypto/subtle`).
+- **Variables de entorno**: Las credenciales sensibles se manejan mediante variables de entorno.
+- **`.env` en .gitignore**: El archivo `.env` está excluido del control de versiones para proteger las credenciales.
+- **CORS**: `CORS_ALLOWED_ORIGINS` es una allowlist exacta y sin configurar no se permite ningún origen. No se envían credenciales: la API no usa cookies.
+- **Proxies**: `TRUSTED_PROXIES` decide de quién se acepta `X-Forwarded-For`. Sin configurar, solo se usa el `RemoteAddr` real, de modo que nadie elige su propio bucket de rate limit ni su identidad en los logs.
+- **Cuerpo del request**: acotado a 8 KiB antes de parsear.
+- **Sin redirects salientes**: el cliente HTTP no sigue redirecciones, así que la API key de Google nunca viaja a otro host.
 
 ## 🧪 Testing
 
 Para ejecutar las pruebas:
 
 ```bash
-go test ./...
+make test        # o: go test ./...
 ```
 
 Para ver cobertura:
@@ -199,6 +238,8 @@ Para ver cobertura:
 ```bash
 go test -cover ./...
 ```
+
+Cobertura medida: `handler` 73.2%, `middleware` 91.8%, `service` 71.9%. `cmd/server`, `internal/errors` y `internal/logger` no tienen tests todavía.
 
 ## 🏗️ Compilación
 

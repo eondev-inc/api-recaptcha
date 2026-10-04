@@ -12,6 +12,9 @@
 *.out
 bin/
 
+# Local tooling state
+.codegraph/
+
 # Go workspace file
 go.work
 
