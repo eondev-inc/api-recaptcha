@@ -26,13 +26,14 @@ func (e *AppError) UserMessage() string {
 
 // Common error codes
 const (
-	ErrCodeValidationFailed   = "VALIDATION_FAILED"
-	ErrCodeInvalidRequest     = "INVALID_REQUEST"
-	ErrCodeRecaptchaFailed    = "RECAPTCHA_FAILED"
-	ErrCodeInternalError      = "INTERNAL_ERROR"
-	ErrCodeRateLimitExceeded  = "RATE_LIMIT_EXCEEDED"
-	ErrCodeUnauthorized       = "UNAUTHORIZED"
-	ErrCodeForbidden          = "FORBIDDEN"
+	ErrCodeValidationFailed  = "VALIDATION_FAILED"
+	ErrCodeInvalidRequest    = "INVALID_REQUEST"
+	ErrCodePayloadTooLarge   = "PAYLOAD_TOO_LARGE"
+	ErrCodeRecaptchaFailed   = "RECAPTCHA_FAILED"
+	ErrCodeInternalError     = "INTERNAL_ERROR"
+	ErrCodeRateLimitExceeded = "RATE_LIMIT_EXCEEDED"
+	ErrCodeUnauthorized      = "UNAUTHORIZED"
+	ErrCodeForbidden         = "FORBIDDEN"
 )
 
 // Predefined errors
