@@ -1,0 +1,326 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "api-recaptcha — request and verification path",
+    "subtitle": "Go 1.22 + Gin single binary that proxies token verification to Google reCAPTCHA Enterprise",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "output": "api-recaptcha.html",
+    "note": "Read from cmd/server/main.go, internal/middleware/*.go, internal/handler/*.go, internal/service/recaptcha.go. Folded out: the slog logger, the AppError to {error, code} mapper, gin's own logger/recovery middleware, and /health + /ready, which sit outside the auth group. The reCAPTCHA JS widget mints the token in Google's own script, outside this repo.",
+    "views": [
+      {
+        "id": "entry-path",
+        "label": "Entry and edge",
+        "focus": [
+          "browser",
+          "client",
+          "ingress",
+          "server"
+        ],
+        "note": "Caller side and the ingress that fronts the binary."
+      },
+      {
+        "id": "middleware-chain",
+        "label": "Auth and rate-limit chain",
+        "focus": [
+          "server",
+          "cors",
+          "ratelimit",
+          "apikey",
+          "verify"
+        ],
+        "note": "CORS, then per-IP rate limit, then constant-time API-key check."
+      },
+      {
+        "id": "google-call",
+        "label": "Google assessment call",
+        "focus": [
+          "verify",
+          "svc",
+          "google"
+        ],
+        "note": "The only outbound call in the repo, 10s client timeout."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "End-user Browser",
+      "sublabel": "reCAPTCHA JS",
+      "tag": "site key",
+      "pos": [
+        40,
+        60
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "client",
+      "type": "external",
+      "label": "Calling Service",
+      "sublabel": "holds APP_API_KEY",
+      "pos": [
+        340,
+        60
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "ingress",
+      "type": "cloud",
+      "label": "Ingress / TLS",
+      "sublabel": "reverse proxy :443",
+      "pos": [
+        640,
+        60
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "server",
+      "type": "backend",
+      "label": "Gin HTTP Server",
+      "sublabel": "cmd/server/main.go",
+      "tag": ":8080 · 15s timeouts",
+      "pos": [
+        640,
+        210
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "cors",
+      "type": "security",
+      "label": "CORS middleware",
+      "sublabel": "CORS_ALLOWED_ORIGINS",
+      "pos": [
+        340,
+        210
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "ratelimit",
+      "type": "security",
+      "label": "Rate limiter",
+      "sublabel": "per-IP bucket",
+      "tag": "100 / 60s",
+      "pos": [
+        40,
+        210
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "apikey",
+      "type": "security",
+      "label": "API-key auth",
+      "sublabel": "X-API-Key header",
+      "tag": "constant time",
+      "pos": [
+        40,
+        360
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "verify",
+      "type": "backend",
+      "label": "Verify handler",
+      "sublabel": "POST /recaptcha/verify",
+      "pos": [
+        340,
+        360
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "svc",
+      "type": "backend",
+      "label": "RecaptchaService",
+      "sublabel": "Assess(ctx, token)",
+      "tag": "X-goog-api-key",
+      "pos": [
+        640,
+        360
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "google",
+      "type": "external",
+      "label": "reCAPTCHA Enterprise",
+      "sublabel": "…googleapis.com/v1",
+      "pos": [
+        640,
+        510
+      ],
+      "size": [
+        200,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "api-recaptcha — one Go binary, non-root container",
+      "wraps": [
+        "server",
+        "cors",
+        "ratelimit",
+        "apikey",
+        "verify",
+        "svc"
+      ],
+      "pad": 28
+    },
+    {
+      "kind": "security-group",
+      "label": "/api/v1 — rate limit, then API key",
+      "wraps": [
+        "cors",
+        "ratelimit",
+        "apikey"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "id": "mint-token",
+      "from": "browser",
+      "to": "client",
+      "label": "token + action",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "call-verify",
+      "from": "client",
+      "to": "ingress",
+      "label": "POST + X-API-Key",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "proxy-to-app",
+      "from": "ingress",
+      "to": "server",
+      "label": "proxy :8080",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 40
+    },
+    {
+      "id": "global-cors",
+      "from": "server",
+      "to": "cors",
+      "label": "router.Use",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "then-ratelimit",
+      "from": "cors",
+      "to": "ratelimit",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "then-apikey",
+      "from": "ratelimit",
+      "to": "apikey",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "authorized",
+      "from": "apikey",
+      "to": "verify",
+      "label": "authenticated",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "assess",
+      "from": "verify",
+      "to": "svc",
+      "label": "Assess",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "google-assess",
+      "from": "svc",
+      "to": "google",
+      "label": "POST assessments",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 44
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Request path",
+      "items": [
+        "One authenticated route: POST /api/v1/recaptcha/verify",
+        "CORS → per-IP rate limit → API key → handler",
+        "GET /health and /ready stay outside the auth group"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Runtime shape",
+      "items": [
+        "Go 1.22 + Gin in a single static binary",
+        "No database: the only state is the in-memory bucket map",
+        "Server timeouts 15s, outbound Google client 10s"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Trust boundaries",
+      "items": [
+        "APP_API_KEY compared with subtle.ConstantTimeCompare",
+        "Google key travels in X-goog-api-key, never a query param",
+        "Handlers return {error, code} only; internals stay in logs"
+      ]
+    }
+  ]
+}
