@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2026-10-04
+
+### 🔒 Security Fixes
+
+Cuatro hallazgos altos de la revisión OWASP, cada uno con test propio:
+
+- **CORS (A01/A05)**: `CORS_ALLOWED_ORIGINS` pasa a ser una allowlist exacta. Sin configurar no se permite ningún origen, un `*` se ignora con warning, y ya no se refleja el `Origin` junto a `Access-Control-Allow-Credentials: true`.
+- **Rate limiting (A01/A04)**: nueva variable `TRUSTED_PROXIES` (IPs o bloques CIDR). Sin configurar, `ClientIP()` es el `RemoteAddr` real, así que un `X-Forwarded-For` falsificado ya no crea buckets nuevos. El mapa de buckets tiene techo y cada 429 incluye `Retry-After`.
+- **Cuerpo sin límite (A04)**: `POST /api/v1/recaptcha/verify` acota el body a 8 KiB y responde `413 PAYLOAD_TOO_LARGE` en lugar de un 400 genérico.
+- **Redirect saliente (A10)**: el cliente HTTP ya no sigue redirecciones, así que un `302` no entrega la API key de Google a otro host.
+
+### ⚠️ Breaking Changes
+
+- **CORS**: el default `*` del `docker-compose.yml` ya no existe. Los despliegues que dependían de él, o de lecturas cross-origin con credenciales, deben listar sus orígenes exactos en `CORS_ALLOWED_ORIGINS`.
+- **Respuesta 413**: nuevo código `PAYLOAD_TOO_LARGE` en el contrato de errores.
+- **Rate limiting**: detrás de un proxy, la variable `TRUSTED_PROXIES` debe declararse para que `ClientIP()` siga reflejando al cliente y no al proxy.
+
+### 🧪 Testing
+
+- Nuevos archivos: `internal/middleware/cors_test.go`, `ratelimit_test.go`, `proxies_test.go` y `internal/service/recaptcha_test.go` (el paquete `service` no tenía ninguno).
+- Cobertura medida: `handler` 73.2%, `middleware` 91.8%, `service` 71.9%.
+- Verificado además con `go test -race ./...` y `go vet ./...`.
+
+### 📝 Documentación
+
+- `IMPROVEMENTS.md` corregido donde afirmaba cosas que el código no hacía, con el comando que respalda cada punto y la lista de lo que sigue abierto.
+- `README.md` documenta `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES` y las respuestas 413/429.
+
 ## [1.1.0] - 2026-01-15
 
 ### 🔒 Security Improvements

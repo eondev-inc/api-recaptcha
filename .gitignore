@@ -12,6 +12,10 @@
 *.out
 bin/
 
+# Local tooling state and planning artifacts (never tracked)
+.codegraph/
+odd/
+
 # Go workspace file
 go.work
 

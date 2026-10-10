@@ -56,6 +56,12 @@ func main() {
 	defer rateLimiter.Stop()
 
 	router := gin.Default()
+	// Decide which peers may set X-Forwarded-For before anything reads ClientIP. Gin trusts every
+	// peer by default, which would let a caller choose its own rate-limit bucket.
+	if err := middleware.ConfigureTrustedProxies(router, os.Getenv("TRUSTED_PROXIES")); err != nil {
+		logger.Log.Error("invalid TRUSTED_PROXIES", "error", err)
+		os.Exit(1)
+	}
 	router.Use(middleware.CORS())
 
 	// Health check endpoints (no authentication required)

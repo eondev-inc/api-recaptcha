@@ -67,7 +67,16 @@ type RecaptchaService struct {
 // NewRecaptchaService builds a RecaptchaService with sane defaults.
 func NewRecaptchaService(apiKey, siteKey, endpoint string) *RecaptchaService {
 	return &RecaptchaService{
-		client:   &http.Client{Timeout: 10 * time.Second},
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+			// Never follow a redirect. Go copies custom headers to the new host and only strips
+			// Authorization, Cookie and Proxy-Authorization, so a 3xx would hand the Google API
+			// key to whatever host it names. Returning the response instead leaves the existing
+			// non-200 path to answer 502.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		apiKey:   apiKey,
 		siteKey:  siteKey,
 		endpoint: endpoint,

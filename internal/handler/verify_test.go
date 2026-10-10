@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -134,5 +135,81 @@ func TestVerifyHandler_Handle_RecaptchaError(t *testing.T) {
 
 	if errResp.Code != apperrors.ErrCodeRecaptchaFailed {
 		t.Errorf("expected error code %s, got %s", apperrors.ErrCodeRecaptchaFailed, errResp.Code)
+	}
+}
+
+// The service validates the token length only after the whole body has been buffered, so nothing
+// bounds the body unless the handler does it. An oversized body must be rejected with 413, before
+// the service is ever consulted.
+func TestVerifyHandler_Handle_RejectsOversizedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	called := false
+	mock := &mockAssessor{
+		assessFunc: func(ctx context.Context, token, action string) (service.AssessmentResult, error) {
+			called = true
+			return service.AssessmentResult{Valid: true}, nil
+		},
+	}
+
+	handler := NewVerifyHandler(mock)
+
+	router := gin.New()
+	router.POST("/verify", handler.Handle)
+
+	oversized, err := json.Marshal(verifyRequest{Token: strings.Repeat("a", 64<<10)})
+	if err != nil {
+		t.Fatalf("failed to marshal oversized body: %v", err)
+	}
+
+	req, _ := http.NewRequest(http.MethodPost, "/verify", bytes.NewReader(oversized))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status 413 for an oversized body, got %d", w.Code)
+	}
+
+	var errResp errorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &errResp); err != nil {
+		t.Fatalf("failed to unmarshal error response: %v", err)
+	}
+	if errResp.Code != "PAYLOAD_TOO_LARGE" {
+		t.Errorf("expected error code PAYLOAD_TOO_LARGE, got %s", errResp.Code)
+	}
+	if called {
+		t.Error("an oversized body must be rejected before the assessor is called")
+	}
+}
+
+// A token at the documented maximum must keep working, so the new limit cannot be tight enough
+// to reject a legitimate request.
+func TestVerifyHandler_Handle_AcceptsBodyWithinTheLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mock := &mockAssessor{
+		assessFunc: func(ctx context.Context, token, action string) (service.AssessmentResult, error) {
+			return service.AssessmentResult{Valid: true}, nil
+		},
+	}
+
+	handler := NewVerifyHandler(mock)
+
+	router := gin.New()
+	router.POST("/verify", handler.Handle)
+
+	reqBody := verifyRequest{Token: strings.Repeat("t", 2000), Action: strings.Repeat("a", 100)}
+	body, _ := json.Marshal(reqBody)
+
+	req, _ := http.NewRequest(http.MethodPost, "/verify", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("a request at the documented limits must be accepted, got %d", w.Code)
 	}
 }

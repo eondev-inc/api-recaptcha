@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,6 +10,11 @@ import (
 	"api-recaptcha/internal/logger"
 	"api-recaptcha/internal/service"
 )
+
+// maxRequestBodyBytes bounds what this handler reads from the socket. A token may hold 2000
+// characters and an action 100, so 8 KiB leaves generous room for JSON escaping while keeping a
+// larger body from ever being buffered.
+const maxRequestBodyBytes = 8 << 10
 
 type verifyRequest struct {
 	Token  string `json:"token" binding:"required"`
@@ -32,8 +38,25 @@ func NewVerifyHandler(recaptcha service.Assessor) VerifyHandler {
 
 // Handle receives a token and delegates the validation to the reCAPTCHA Enterprise API.
 func (h VerifyHandler) Handle(c *gin.Context) {
+	// Bound the body before parsing it: ShouldBindJSON buffers whatever the client sends, and the
+	// token-length check inside the service only runs afterwards.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
+
 	var payload verifyRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			logger.Log.Warn("request body over the limit",
+				"limit", maxRequestBodyBytes,
+				"ip", c.ClientIP(),
+			)
+			c.JSON(http.StatusRequestEntityTooLarge, errorResponse{
+				Error: "request body too large",
+				Code:  apperrors.ErrCodePayloadTooLarge,
+			})
+			return
+		}
+
 		logger.Log.Warn("invalid request body",
 			"error", err.Error(),
 			"ip", c.ClientIP(),

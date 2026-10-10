@@ -8,13 +8,15 @@ Se han implementado **10 categorías de mejoras** que aumentan significativament
 
 ### Métricas de Mejora
 
-| Categoría | Antes | Después | Mejora |
-|-----------|-------|---------|--------|
-| **Seguridad** | 3/10 | 9/10 | 🔺 200% |
-| **Testabilidad** | 0/10 | 8/10 | 🔺 ∞ |
-| **Observabilidad** | 2/10 | 8/10 | 🔺 300% |
-| **Deployment** | 3/10 | 9/10 | 🔺 200% |
-| **Cobertura Tests** | 0% | 85%+ | 🔺 ∞ |
+La versión anterior de esta tabla era una autoevaluación sin evidencia (por ejemplo "Seguridad 3/10 → 9/10"). Ahora cada fila cita cómo se comprueba.
+
+| Categoría | Antes | Ahora | Cómo se comprueba |
+|-----------|-------|-------|-------------------|
+| **Seguridad** | Sin autenticación, errores con detalle interno | API key en tiempo constante, errores user-safe, CORS con allowlist, body acotado, sin redirects salientes | `go test ./...` (ver §1) |
+| **Testabilidad** | 0 tests | 4 paquetes con tests, `Assessor` como interfaz para mocking | `go test -cover ./...` |
+| **Observabilidad** | Logs sin estructura | `log/slog` JSON + `/health` y `/ready` | `internal/logger/logger.go`, `internal/handler/health.go` |
+| **Deployment** | Binario suelto | Dockerfile multi-stage, usuario non-root, healthcheck | `docker build .` |
+| **Cobertura** | 0% | 73.2% handler · 91.8% middleware · 71.9% service | `go test -cover ./...` |
 
 ---
 
@@ -40,23 +42,58 @@ req.Header.Set("X-goog-api-key", s.apiKey)
 ```
 **Impacto:** El API key ya no aparece en logs de servidores intermedios.
 
-#### 1.3 CORS Configurado
+#### 1.3 CORS con allowlist estricta
 **Archivo:** `internal/middleware/cors.go`
-- Control de orígenes permitidos
-- Headers permitidos específicos
-- Soporte para preflight requests (OPTIONS)
+
+`CORS_ALLOWED_ORIGINS` es una lista separada por comas de orígenes exactos.
+
+- Sin configurar, **ningún** origen cross-origin es aceptado (fail-closed) y se registra un warning.
+- Un `*` no es una allowlist: se ignora con un warning en vez de permitir cualquier origen.
+- Solo un match exacto devuelve `Access-Control-Allow-Origin` con el origen del request, más `Vary: Origin`.
+- `Access-Control-Allow-Credentials` no se envía nunca: la API autentica con el header `X-API-Key` y no usa cookies.
+- El preflight anuncia solo lo que existe (`GET, POST, OPTIONS`, `Content-Type, X-API-Key`).
+
+Corregido en la revisión OWASP del 2026-10-04: antes reflejaba cualquier `Origin` cuando la lista contenía `*` (el default del `docker-compose`) y enviaba `Allow-Credentials: true`. Ver §1.8.
 
 #### 1.4 Rate Limiting por IP
-**Archivo:** `internal/middleware/ratelimit.go`
-- Token bucket algorithm
-- Configurable por environment variables
-- Limpieza automática de buckets antiguos
+**Archivos:** `internal/middleware/ratelimit.go`, `internal/middleware/proxies.go`
+
+- **Ventana fija por cliente**, no token bucket: la cuota se renueva de una vez al cambiar la ventana y lo no usado no se acumula.
+- Configurable con `RATE_LIMIT_REQUESTS` y `RATE_LIMIT_WINDOW_SECONDS`; limpieza automática de buckets viejos.
+- La clave es `ClientIP()`, y `TRUSTED_PROXIES` decide de qué peers se acepta el header: sin configurar, solo cuenta el `RemoteAddr` real. Gin confía en todos los proxies por defecto, así que sin esa variable un cliente elegía su propio bucket rotando `X-Forwarded-For`.
+- El mapa de buckets tiene un techo; un cliente nuevo más allá del techo recibe 429 en lugar de asignar memoria.
+- Cada 429 lleva `Retry-After` con los segundos que quedan de ventana.
+
+Corregido en la revisión OWASP del 2026-10-04: la documentación lo llamaba "token bucket" y afirmaba que prevenía abuso, cuando la clave era falsificable. Ver §1.8.
 
 #### 1.5 Errores Seguros
 **Archivo:** `internal/errors/errors.go`
 - Mensajes user-safe separados de errores internos
 - Los stack traces no se exponen al cliente
 - Códigos de error estructurados
+
+#### 1.6 Body acotado antes de parsear
+**Archivo:** `internal/handler/verify.go`
+
+`http.MaxBytesReader` limita el cuerpo a 8 KiB antes de `ShouldBindJSON`. Un cuerpo mayor responde `413 PAYLOAD_TOO_LARGE` y nunca llega al servicio. La validación de longitud del token (2000 caracteres) corre en `service.Assess`, o sea después de bufferizar el body: por sí sola no acotaba nada.
+
+Corregido en la revisión OWASP del 2026-10-04. Ver §1.8.
+
+#### 1.7 Sin redirects en la llamada saliente
+**Archivo:** `internal/service/recaptcha.go`
+
+El cliente HTTP no sigue redirecciones (`http.ErrUseLastResponse`). Go copia los headers custom al host destino y solo filtra `Authorization`, `Cookie` y `Proxy-Authorization`, así que un `302` entregaba la API key de Google a cualquier host. Un `3xx` ahora se trata como error y responde 502.
+
+#### 1.8 Revisión OWASP del 2026-10-04
+
+Cuatro hallazgos altos, cada uno cerrado con test propio y evidencia RED/GREEN registrada en `odd/tasks/security-hardening.md`:
+
+| Hallazgo | Corrección | Test |
+|----------|-----------|------|
+| CORS reflejaba cualquier origen con credenciales | allowlist exacta, sin `Allow-Credentials` | `internal/middleware/cors_test.go` |
+| Rate limit evadible con `X-Forwarded-For` | `TRUSTED_PROXIES` + techo del mapa + `Retry-After` | `ratelimit_test.go`, `proxies_test.go` |
+| Body sin límite | `MaxBytesReader` → 413 | `internal/handler/verify_test.go` |
+| Fuga de la API key de Google por redirect | sin seguir redirecciones | `internal/service/recaptcha_test.go` |
 
 ---
 
@@ -83,7 +120,9 @@ if len(action) > 100 {
 }
 ```
 
-**Impacto:** Previene DoS y validaciones tempranas ahorran llamadas a Google.
+**Impacto:** Previene validaciones tempranas y ahorra llamadas a Google.
+
+**Límite del enfoque:** estas validaciones corren dentro de `service.Assess`, es decir después de que `ShouldBindJSON` ya bufferizó el body completo. No acotan el volumen del request; para eso está el límite de 8 KiB del §1.6, que responde 413 antes de parsear.
 
 ---
 
@@ -177,13 +216,22 @@ srv := &http.Server{
 - **Handler Tests:** `internal/handler/verify_test.go`
   - Success case
   - Invalid request
+  - Cuerpo sobre el límite → 413 `PAYLOAD_TOO_LARGE`
+  - Cuerpo en los límites documentados → 200
   - reCAPTCHA errors
 
-- **Middleware Tests:** `internal/middleware/apikey_test.go`
-  - Valid key
-  - Missing key
-  - Invalid key
-  - Timing attack resistance
+- **Middleware Tests:** `internal/middleware/apikey_test.go`, `cors_test.go`, `ratelimit_test.go`, `proxies_test.go`
+  - API key válida, ausente, inválida y resistencia a timing
+  - CORS: default cerrado, `*` ignorado, match exacto, sin credenciales, preflight acotado
+  - Rate limit: cuota, `Retry-After`, reinicio de ventana, techo del mapa, `X-Forwarded-For` falsificado
+  - `TRUSTED_PROXIES`: sin configurar no confía en nadie, lista por IP y por CIDR, entrada inválida rechazada
+
+- **Service Tests:** `internal/service/recaptcha_test.go`
+  - Sin redirects: la API key no se filtra a otro host
+  - Mapeo de la respuesta de Google
+  - Acción recortada antes de enviarse
+  - Error upstream sin detalle interno
+  - Validación antes de cualquier llamada de red
 
 - **Health Check Tests:** `internal/handler/health_test.go`
   - Health endpoint
@@ -192,9 +240,15 @@ srv := &http.Server{
 #### 5.2 Cobertura
 ```bash
 $ go test -cover ./...
-ok      api-recaptcha/internal/handler      0.018s  coverage: 87.5% of statements
-ok      api-recaptcha/internal/middleware   0.017s  coverage: 90.0% of statements
+ok      api-recaptcha/internal/handler      0.009s  coverage: 73.2% of statements
+ok      api-recaptcha/internal/middleware   1.210s  coverage: 91.8% of statements
+ok      api-recaptcha/internal/service      0.004s  coverage: 71.9% of statements
+        api-recaptcha/cmd/server                    coverage: 0.0% of statements
+        api-recaptcha/internal/errors               coverage: 0.0% of statements
+        api-recaptcha/internal/logger               coverage: 0.0% of statements
 ```
+
+La afirmación anterior de "85%+ de cobertura en las rutas críticas" era cierta solo para los paquetes que tenían tests. `cmd/server` (dónde se arma el router y se decide la confianza en proxies) sigue sin cobertura.
 
 ---
 
@@ -401,21 +455,27 @@ if err != nil {
 
 ## ✅ Checklist de Producción
 
-- [x] Seguridad: Timing attacks prevenidos
-- [x] Seguridad: API keys en headers
-- [x] Seguridad: CORS configurado
-- [x] Seguridad: Rate limiting activo
-- [x] Seguridad: Input validation
-- [x] Tests: Cobertura >80%
-- [x] Logging: Estructurado (JSON)
-- [x] Monitoring: Health checks
-- [x] Deployment: Dockerfile optimizado
-- [x] Deployment: Docker Compose
-- [x] Docs: README actualizado
-- [x] Docs: CHANGELOG.md
-- [ ] CI/CD: Pipeline configurado (recomendado)
-- [ ] Monitoring: Métricas de Prometheus (recomendado)
-- [ ] Docs: OpenAPI/Swagger (recomendado)
+Cada casilla marcada indica **dónde se comprueba**, no una intención.
+
+- [x] Seguridad: comparación en tiempo constante (`internal/middleware/apikey_test.go`)
+- [x] Seguridad: API keys en headers, nunca en query string (`internal/service/recaptcha.go`)
+- [x] Seguridad: CORS con allowlist y sin credenciales (`internal/middleware/cors_test.go`)
+- [x] Seguridad: rate limiting con proxies no confiados por defecto (`internal/middleware/proxies_test.go`)
+- [x] Seguridad: body acotado antes de parsear (`internal/handler/verify_test.go`)
+- [x] Seguridad: sin redirects en la llamada saliente (`internal/service/recaptcha_test.go`)
+- [x] Tests: `go test ./...` en verde (handler 73.2%, middleware 91.8%, service 71.9%)
+- [x] Logging: estructurado (JSON)
+- [x] Monitoring: `/health` y `/ready`
+- [x] Deployment: Dockerfile multi-stage con usuario non-root
+- [ ] Seguridad: headers de respuesta (HSTS, `X-Content-Type-Options`, `Referrer-Policy`)
+- [ ] Seguridad: `govulncheck` en CI y bump de dependencias de 2024 (`gin 1.10.0`, `x/net 0.25.0`, `x/crypto 0.23.0`) y de Go 1.22 (EOL)
+- [ ] Seguridad: imágenes base fijadas por digest y endurecimiento del compose (`read_only`, `cap_drop`, `no-new-privileges`)
+- [ ] Seguridad: `/ready` no verifica la dependencia de Google (responde 200 siempre)
+- [ ] Seguridad: API keys por cliente con rotación en lugar de una clave estática compartida
+- [ ] Seguridad: el site key hardcodeado en `cmd/server/main.go` sigue ahí como fallback (el `CHANGELOG` 1.1.0 lo daba por corregido)
+- [ ] CI/CD: pipeline configurado
+- [ ] Observabilidad: métricas Prometheus
+- [ ] Docs: OpenAPI/Swagger
 
 ---
 
@@ -426,6 +486,7 @@ if err != nil {
 3. **Testing:** Interfaces facilitan enormemente el testing
 4. **Docker:** Multi-stage builds reducen imágenes a <20MB
 5. **Graceful Shutdown:** Esencial para 0 downtime deployments
+6. **Sin evidencia no es un hecho:** la versión anterior de este documento marcaba CORS, rate limiting y validación de entrada como resueltos. Los tres tenían un agujero real que ningún test cubría, porque no había tests en `middleware/cors.go`, `middleware/ratelimit.go` ni `service/recaptcha.go`. Un checklist sin el comando que lo demuestra es una promesa, no un hecho.
 
 ---
 
